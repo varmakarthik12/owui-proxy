@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -96,8 +95,14 @@ func initLogger() {
 
 // MaskToken returns a masked version of a bearer token for safe logging.
 func MaskToken(token string) string {
-	if len(token) <= 4 {
+	if len(token) <= 8 {
 		return "****"
 	}
-	return fmt.Sprintf("%s****", token[:3])
+	if strings.HasPrefix(token, "sk-") && len(token) > 12 {
+		return token[:7] + "...****"
+	}
+	if len(token) > 20 {
+		return token[:5] + "..." + token[len(token)-5:]
+	}
+	return token[:4] + "****"
 }

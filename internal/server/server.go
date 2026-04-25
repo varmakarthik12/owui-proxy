@@ -113,17 +113,13 @@ func registerRoutes(mux *http.ServeMux, client *owuiclient.Client, cfg *config.C
 	mux.HandleFunc("HEAD /api/blobs/", handler.Unimplemented())
 
 	// Root endpoint — some Ollama clients check if the server is alive.
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("Ollama is running"))
 	})
 
 	// HEAD / — some clients use HEAD to check connectivity.
-	mux.HandleFunc("HEAD /", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("HEAD /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 }

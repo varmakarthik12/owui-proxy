@@ -166,50 +166,31 @@ curl http://localhost:11434/api/chat -d '{
 ### Minimal
 
 ```bash
-owui-proxy serve \
-  --endpoint https://openwebui.example.com \
-  --token sk-abc123
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123
 ```
 
 ### Custom port + version mock
 
 ```bash
-owui-proxy serve \
-  --endpoint https://openwebui.example.com \
-  --token sk-abc123 \
-  --port 11435 \
-  --mock-version 0.5.1
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --port 11435 --mock-version 0.5.1
 ```
 
 ### Network-exposed with TLS + rate limit
 
 ```bash
-owui-proxy serve \
-  --endpoint https://openwebui.example.com \
-  --token sk-abc123 \
-  --bind-all \
-  --tls-cert /etc/ssl/proxy.crt \
-  --tls-key  /etc/ssl/proxy.key \
-  --rate-limit 20
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --bind-all --tls-cert /etc/ssl/proxy.crt --tls-key /etc/ssl/proxy.key --rate-limit 20
 ```
 
 ### Debug logging to see translation in action
 
 ```bash
-owui-proxy serve \
-  --endpoint https://openwebui.example.com \
-  --token sk-abc123 \
-  --log-level debug \
-  --log-format json
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --log-level debug --log-format json
 ```
 
 ### Custom API prefix (if Open WebUI is behind a subpath)
 
 ```bash
-owui-proxy serve \
-  --endpoint https://openwebui.example.com \
-  --api-prefix /internal/api \
-  --token sk-abc123
+owui-proxy serve --endpoint https://openwebui.example.com --api-prefix /internal/api --token sk-abc123
 ```
 
 ---

@@ -238,10 +238,16 @@ func (c *Client) setHeaders(req *http.Request) {
 }
 
 func maskToken(token string) string {
-	if len(token) <= 4 {
+	if len(token) <= 8 {
 		return "****"
 	}
-	return token[:3] + "****"
+	if strings.HasPrefix(token, "sk-") && len(token) > 12 {
+		return token[:7] + "...****"
+	}
+	if len(token) > 20 {
+		return token[:5] + "..." + token[len(token)-5:]
+	}
+	return token[:4] + "****"
 }
 
 // TimeNow returns the current time in RFC3339 format with nanoseconds.
