@@ -5,21 +5,21 @@
 class OwuiProxy < Formula
   desc "Local Ollama-compatible API proxy for Open WebUI"
   homepage "https://github.com/varmakarthik12/owui-proxy"
-  version "0.1.0"
+  version "0.1.1"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.0/owui-proxy_0.1.0_Darwin_x86_64.tar.gz"
-      sha256 "e2c80677d74fadd06c97a21e2c15042161e65b340a918c42ce2936c58cb7447a"
+      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.1/owui-proxy_0.1.1_Darwin_x86_64.tar.gz"
+      sha256 "3d5e64bbabe1a7c00df5b74713f4a11f101fba872f8eb15aa7ad1b4a94470104"
 
       define_method(:install) do
         bin.install "owui-proxy"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.0/owui-proxy_0.1.0_Darwin_arm64.tar.gz"
-      sha256 "886d9e55f8f17848a0ea1339402bb7db55c7170747f32a147770ab2d0c69289c"
+      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.1/owui-proxy_0.1.1_Darwin_arm64.tar.gz"
+      sha256 "b4ff04807b95bf08525827bafc2385b96c4708dfa3177ee6df40058cf0765631"
 
       define_method(:install) do
         bin.install "owui-proxy"
@@ -29,15 +29,15 @@ class OwuiProxy < Formula
 
   on_linux do
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.0/owui-proxy_0.1.0_Linux_x86_64.tar.gz"
-      sha256 "f6e8e56b511961b02cc6b4bc5d1d885e844f1c6a40899a329b437daae0239c34"
+      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.1/owui-proxy_0.1.1_Linux_x86_64.tar.gz"
+      sha256 "02204be36ca3a6256f739b9b40b679a45515a6dba8bfe6577625e8cb1cb7502a"
       define_method(:install) do
         bin.install "owui-proxy"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.0/owui-proxy_0.1.0_Linux_arm64.tar.gz"
-      sha256 "478cc360c6c1c4d64755cc915ef1ca903bbbb04d9f174ff6d149679897914c0b"
+      url "https://github.com/varmakarthik12/owui-proxy/releases/download/v0.1.1/owui-proxy_0.1.1_Linux_arm64.tar.gz"
+      sha256 "4e4097f5d2316ddcdc288139573424f9ffc787f3f0f669fcf524a527dfacc64a"
       define_method(:install) do
         bin.install "owui-proxy"
       end
