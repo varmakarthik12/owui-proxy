@@ -7,9 +7,9 @@ BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")
 
 LDFLAGS := -ldflags "\
   -s -w \
-  -X main.Version=$(VERSION) \
-  -X main.Commit=$(COMMIT) \
-  -X main.BuildDate=$(BUILD_DATE)"
+  -X $(MODULE)/cmd.Version=$(VERSION) \
+  -X $(MODULE)/cmd.Commit=$(COMMIT) \
+  -X $(MODULE)/cmd.BuildDate=$(BUILD_DATE)"
 
 .PHONY: all build test lint fmt install clean release-dry help
 

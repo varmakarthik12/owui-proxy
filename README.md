@@ -16,14 +16,14 @@
 **Clients never know they are talking to Open WebUI.** To them, `owui-proxy` looks and behaves exactly like a native Ollama server.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Any Ollama Client                                      │
-│  (ollama CLI, Continue.dev, Aider, LM Studio, scripts)  │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       │  Ollama REST API (port 11434)
-                       │  NDJSON streaming
-                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  Any Ollama Client                                                                                      │
+│  (ollama CLI, GitHub Copilot (Bring Your Own Model), Continue.dev, Aider, LM Studio, scripts)           │
+└────────────────────────┬────────────────────────────────────────────────────────────────────────────────┘
+                         │
+                         │  Ollama REST API (port 11434)
+                         │  NDJSON streaming
+                         ▼
               ┌─────────────────┐
               │   owui-proxy    │
               │   :11434        │
@@ -41,9 +41,9 @@
                        │
                        ▼
               ┌─────────────────────────────────────────┐
-              │  All Models                              │
-              │  Ollama, Claude, GPT-4o, Gemini,         │
-              │  Pipelines, Functions, ...               │
+              │  All Models                             │
+              │  Ollama, Claude, GPT-4o, Gemini,        │
+              │  Pipelines, Functions, ...              │
               └─────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@
 
 ## Why owui-proxy?
 
-- **Use any Ollama tool with any Open WebUI model** — Continue.dev, Aider, LM Studio, shell scripts, and more all speak the Ollama API. Open WebUI exposes all models (not just local Ollama ones) via its OpenAI-compatible API. `owui-proxy` bridges the two.
+- **Use any Ollama tool with any Open WebUI model** — GitHub Copilot (Bring Your Own Model), Continue.dev, Aider, LM Studio, shell scripts, and more all speak the Ollama API. Open WebUI exposes all models (not just local Ollama ones) via its OpenAI-compatible API. `owui-proxy` bridges the two.
 
 - **Access all your models in one place** — local Ollama models, Claude, GPT-4o, Gemini, custom Pipelines — everything your Open WebUI instance can reach, now accessible through any Ollama client.
 
@@ -238,6 +238,25 @@ Add to `~/.continue/config.json`:
 ### LM Studio
 
 Set the Ollama-compatible server URL to `http://localhost:11434`.
+
+### GitHub Copilot (Bring Your Own Model)
+
+GitHub Copilot now supports local models via Ollama. You can use `owui-proxy` to connect Copilot to *any* model in your Open WebUI instance.
+Follow these steps in VS Code:
+
+1. Open the Copilot Chat sidebar (top-right icon)
+
+2. Click the model selector dropdown → Manage Models
+
+3. Click Add Models → select Ollama
+
+4. All models from your Open WebUI instance will appear — click Unhide on any model to activate it
+
+5. Select Local at the bottom of the Copilot Chat panel to route requests through owui-proxy
+
+    > **Tip:** The `github.copilot.chat.byok.ollamaEndpoint` setting lets you point Copilot at a non-default address — useful inside devcontainers or when running owui-proxy on a custom port. Set it to `http://host.docker.internal:11434` when working inside Docker.
+
+
 
 ### Shell scripts
 

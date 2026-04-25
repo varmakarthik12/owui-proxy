@@ -3,6 +3,7 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,16 +11,31 @@ import (
 )
 
 var (
-	version   = "dev"
-	commit    = "none"
-	buildDate = "unknown"
+	// Version, Commit, and BuildDate are populated via ldflags at build time.
+	// They are exported so GoReleaser and Makefile can target them directly.
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
 )
 
-// SetBuildInfo stores build metadata from main.go ldflags.
-func SetBuildInfo(v, c, d string) {
-	version = v
-	commit = c
-	buildDate = d
+// InitVersionInfo initializes version metadata, falling back to Go module
+// build info if ldflags weren't provided.
+func InitVersionInfo() {
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			if info.Main.Version != "" && info.Main.Version != "(devel)" {
+				Version = info.Main.Version
+			}
+			for _, setting := range info.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					Commit = setting.Value
+				case "vcs.time":
+					BuildDate = setting.Value
+				}
+			}
+		}
+	}
 }
 
 var rootCmd = &cobra.Command{

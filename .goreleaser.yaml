@@ -24,9 +24,9 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.Commit={{.Commit}}
-      - -X main.BuildDate={{.Date}}
+      - -X github.com/varmakarthik12/owui-proxy/cmd.Version={{.Version}}
+      - -X github.com/varmakarthik12/owui-proxy/cmd.Commit={{.Commit}}
+      - -X github.com/varmakarthik12/owui-proxy/cmd.BuildDate={{.Date}}
 
 archives:
   - format: tar.gz
