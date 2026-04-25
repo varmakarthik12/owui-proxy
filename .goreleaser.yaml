@@ -1,0 +1,81 @@
+version: 2
+
+project_name: owui-proxy
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - main: .
+    binary: owui-proxy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.Commit}}
+      - -X main.BuildDate={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+brews:
+  - repository:
+      owner: varmakarthik12
+      name: owui-proxy          # Same repo — no separate homebrew-tap repo needed
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: HomebrewFormula  # Formula lives at HomebrewFormula/owui-proxy.rb in this repo
+    homepage: "https://github.com/varmakarthik12/owui-proxy"
+    description: "Local Ollama-compatible API proxy for Open WebUI"
+    license: "MIT"
+    install: |
+      bin.install "owui-proxy"
+    test: |
+      system "#{bin}/owui-proxy", "version"
+
+release:
+  github:
+    owner: varmakarthik12
+    name: owui-proxy
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
