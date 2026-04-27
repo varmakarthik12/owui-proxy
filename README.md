@@ -284,6 +284,9 @@ Set the Ollama-compatible server URL to `http://localhost:11434`.
 ### GitHub Copilot (Bring Your Own Model)
 
 GitHub Copilot now supports local models via Ollama. You can use `owui-proxy` to connect Copilot to _any_ model in your Open WebUI instance.
+
+![GitHub Copilot Bring Your Own Model](./docs/github-copilot-bring-your-own-model.gif)
+
 Follow these steps in VS Code:
 
 1. Open the Copilot Chat sidebar (top-right icon)
@@ -297,7 +300,6 @@ Follow these steps in VS Code:
 5. Select Local at the bottom of the Copilot Chat panel to route requests through owui-proxy
 
    > **Tip:** The `github.copilot.chat.byok.ollamaEndpoint` setting lets you point Copilot at a non-default address — useful inside devcontainers or when running owui-proxy on a custom port. Set it to `http://host.docker.internal:11434` when working inside Docker.
-
 ### GitHub Copilot via OpenAI-compatible endpoint
 
 If your Copilot plan or extension version uses the OpenAI wire format directly, point it at the proxy's `/v1/` base URL:
