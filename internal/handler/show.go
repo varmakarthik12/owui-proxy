@@ -3,19 +3,21 @@ package handler
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/varmakarthik12/owui-proxy/internal/config"
 	"github.com/varmakarthik12/owui-proxy/internal/owuiclient"
 	"github.com/varmakarthik12/owui-proxy/internal/translator"
 )
 
 // Show handles POST /api/show — returns model details.
-// Synthesized from the models list since Open WebUI doesn't expose
-// individual model details.
-func Show(client *owuiclient.Client) http.HandlerFunc {
+// All metadata is sourced from OWUI's GET /api/models response.
+// Accepts model names with or without cfg.ModelPrefix and looks up by real name.
+func Show(client *owuiclient.OwuiClient, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		owuiclient.StripSensitiveHeaders(r.Header)
 
-		var req translator.OllamaShowRequest
+		var req translator.ShowRequest
 		if err := owuiclient.ReadJSON(r.Body, &req); err != nil {
 			owuiclient.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -27,9 +29,11 @@ func Show(client *owuiclient.Client) http.HandlerFunc {
 			return
 		}
 
-		slog.Debug("show request", "model", modelName)
+		// Strip prefix before looking up in OWUI.
+		lookupName := strings.TrimPrefix(modelName, cfg.ModelPrefix)
 
-		// Fetch all models and find the requested one.
+		slog.Debug("show request", "model", lookupName)
+
 		models, err := client.ListModels(r.Context())
 		if err != nil {
 			slog.Error("failed to list models for show", "error", owuiclient.FormatUpstreamError(err, ""))
@@ -38,10 +42,9 @@ func Show(client *owuiclient.Client) http.HandlerFunc {
 			return
 		}
 
-		// Find the matching model.
-		var found *owuiclient.Model
+		var found *owuiclient.OWUIModel
 		for i := range models.Data {
-			if models.Data[i].ID == modelName {
+			if models.Data[i].ID == lookupName {
 				found = &models.Data[i]
 				break
 			}
@@ -53,7 +56,7 @@ func Show(client *owuiclient.Client) http.HandlerFunc {
 			return
 		}
 
-		resp := translator.ModelToShow(found)
+		resp := translator.ModelToShow(found, cfg.NoDefaultCapabilities, cfg.DefaultContextLength, cfg.NoContextLengthOverride)
 		owuiclient.WriteJSON(w, http.StatusOK, resp)
 	}
 }

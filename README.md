@@ -21,14 +21,16 @@
 │  (ollama CLI, GitHub Copilot (Bring Your Own Model), Continue.dev, Aider, LM Studio, scripts)           │
 └────────────────────────┬────────────────────────────────────────────────────────────────────────────────┘
                          │
-                         │  Ollama REST API (port 11434)
-                         │  NDJSON streaming
+                         │  Ollama REST API (port 11434)  /api/*
+                         │  OpenAI REST API (port 11434)  /v1/*
+                         │  NDJSON / SSE streaming
                          ▼
               ┌─────────────────┐
               │   owui-proxy    │
               │   :11434        │
               └────────┬────────┘
                        │  ← translates Ollama ↔ OpenAI formats
+                       │  ← proxies /v1/* directly
                        │  ← injects Authorization header
                        │
                        │  OpenAI-compatible REST API
@@ -52,6 +54,8 @@
 ## Why owui-proxy?
 
 - **Use any Ollama tool with any Open WebUI model** — GitHub Copilot (Bring Your Own Model), Continue.dev, Aider, LM Studio, shell scripts, and more all speak the Ollama API. Open WebUI exposes all models (not just local Ollama ones) via its OpenAI-compatible API. `owui-proxy` bridges the two.
+
+- **Also speaks the OpenAI `/v1/` API** — tools that use the OpenAI wire format (GitHub Copilot's "Bring Your Own Model" in OpenAI mode, LiteLLM clients, etc.) can also point directly at the proxy via `POST /v1/chat/completions` and `GET /v1/models`.
 
 - **Access all your models in one place** — local Ollama models, Claude, GPT-4o, Gemini, custom Pipelines — everything your Open WebUI instance can reach, now accessible through any Ollama client.
 
@@ -141,23 +145,49 @@ curl http://localhost:11434/api/chat -d '{
 
 ## Full Configuration Reference
 
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--endpoint` | `OWUI_ENDPOINT` | — | **Yes** | Base URL of your Open WebUI instance |
-| `--token` | `OWUI_TOKEN` | — | **Yes** | Bearer token (Open WebUI API key) |
-| `--port` | `OWUI_PROXY_PORT` | `11434` | No | Local port to listen on |
-| `--listen-addr` | `OWUI_LISTEN_ADDR` | `127.0.0.1` | No | Bind address (localhost-only by default) |
-| `--bind-all` | `OWUI_BIND_ALL` | `false` | No | Bind to `0.0.0.0` — exposes on network |
-| `--mock-version` | `OWUI_MOCK_VERSION` | `0.6.5` | No | Ollama version string for `/api/version` |
-| `--api-prefix` | `OWUI_API_PREFIX` | `/api` | No | Open WebUI API path prefix |
-| `--timeout` | `OWUI_TIMEOUT` | `300s` | No | HTTP client timeout for upstream requests |
-| `--rate-limit` | `OWUI_RATE_LIMIT` | `0` | No | Max requests/sec per client IP (0 = disabled) |
-| `--max-body-size` | `OWUI_MAX_BODY_SIZE` | `104857600` | No | Max request body size in bytes (100MB) |
-| `--tls-cert` | `OWUI_TLS_CERT` | — | No | TLS cert file path (enables HTTPS) |
-| `--tls-key` | `OWUI_TLS_KEY` | — | No | TLS key file path |
-| `--log-level` | `OWUI_LOG_LEVEL` | `info` | No | Log level: `debug`, `info`, `warn`, `error` |
-| `--log-format` | `OWUI_LOG_FORMAT` | `text` | No | Log format: `text` or `json` |
-| `--no-color` | `NO_COLOR` | `false` | No | Disable colored terminal output |
+### Required
+
+| Flag         | Env Var         | Description                                   |
+| ------------ | --------------- | --------------------------------------------- |
+| `--endpoint` | `OWUI_ENDPOINT` | Base URL of your Open WebUI instance          |
+| `--token`    | `OWUI_TOKEN`    | Bearer token (Open WebUI API key). Prefer env var — CLI flag is visible in `ps aux` |
+
+### Server
+
+| Flag            | Env Var            | Default     | Description                                     |
+| --------------- | ------------------ | ----------- | ----------------------------------------------- |
+| `--port`        | `OWUI_PROXY_PORT`  | `11434`     | Local port to listen on                         |
+| `--listen-addr` | `OWUI_LISTEN_ADDR` | `127.0.0.1` | Bind address (localhost-only by default)         |
+| `--bind-all`    | `OWUI_BIND_ALL`    | `false`     | Bind to `0.0.0.0` — exposes on the network      |
+| `--tls-cert`    | `OWUI_TLS_CERT`    | —           | TLS cert file (enables HTTPS; requires `--tls-key`) |
+| `--tls-key`     | `OWUI_TLS_KEY`     | —           | TLS key file (requires `--tls-cert`)            |
+| `--rate-limit`  | `OWUI_RATE_LIMIT`  | `0`         | Max requests/sec per client IP (0 = disabled)   |
+| `--max-body-size` | `OWUI_MAX_BODY_SIZE` | `104857600` | Max request body in bytes (100 MB)          |
+| `--timeout`     | `OWUI_TIMEOUT`     | `300s`      | HTTP client timeout for upstream requests       |
+
+### Translation
+
+| Flag           | Env Var           | Default | Description                                              |
+| -------------- | ----------------- | ------- | -------------------------------------------------------- |
+| `--api-prefix` | `OWUI_API_PREFIX` | `/api`  | Open WebUI API path prefix (change if behind a subpath) |
+| `--mock-version` | `OWUI_MOCK_VERSION` | `0.6.5` | Ollama version string returned by `GET /api/version` |
+
+### Model behaviour
+
+| Flag                           | Env Var                            | Default        | Description |
+| ------------------------------ | ---------------------------------- | -------------- | ----------- |
+| `--model-prefix`               | `OWUI_MODEL_PREFIX`                | `owui-proxy/`  | Prefix added to all model IDs in `/api/tags`, `/v1/models`. Stripped before forwarding requests to Open WebUI. Set to empty string to disable. |
+| `--no-default-capabilities`    | `OWUI_NO_DEFAULT_CAPABILITIES`     | `false`        | Disable auto-appending `completion`, `vision`, `tools`, `thinking` capabilities to every model in `/api/show` responses. |
+| `--default-context-length`     | `OWUI_DEFAULT_CONTEXT_LENGTH`      | `262144` (256K) | Minimum context window size (tokens) to report in `/api/show` `model_info`. Any upstream `*.context_length` value smaller than this is raised to this value; if no context key exists, `general.context_length` is injected. |
+| `--no-context-length-override` | `OWUI_NO_CONTEXT_LENGTH_OVERRIDE`  | `false`        | Disable the context length floor — leave `model_info` exactly as Open WebUI reports it. |
+
+### Logging
+
+| Flag            | Env Var          | Default  | Description                                  |
+| --------------- | ---------------- | -------- | -------------------------------------------- |
+| `--log-level`   | `OWUI_LOG_LEVEL` | `info`   | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `--log-format`  | `OWUI_LOG_FORMAT`| `text`   | Log format: `text` or `json`                 |
+| `--no-color`    | `NO_COLOR`       | `false`  | Disable coloured terminal output             |
 
 ---
 
@@ -191,6 +221,18 @@ owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --lo
 
 ```bash
 owui-proxy serve --endpoint https://openwebui.example.com --api-prefix /internal/api --token sk-abc123
+```
+
+### Disable model prefix (expose raw OWUI model IDs)
+
+```bash
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --model-prefix ""
+```
+
+### Disable context length override (trust upstream values as-is)
+
+```bash
+owui-proxy serve --endpoint https://openwebui.example.com --token sk-abc123 --no-context-length-override
 ```
 
 ---
@@ -241,7 +283,7 @@ Set the Ollama-compatible server URL to `http://localhost:11434`.
 
 ### GitHub Copilot (Bring Your Own Model)
 
-GitHub Copilot now supports local models via Ollama. You can use `owui-proxy` to connect Copilot to *any* model in your Open WebUI instance.
+GitHub Copilot now supports local models via Ollama. You can use `owui-proxy` to connect Copilot to _any_ model in your Open WebUI instance.
 Follow these steps in VS Code:
 
 1. Open the Copilot Chat sidebar (top-right icon)
@@ -250,13 +292,26 @@ Follow these steps in VS Code:
 
 3. Click Add Models → select Ollama
 
-4. All models from your Open WebUI instance will appear — click Unhide on any model to activate it
+4. All models from your Open WebUI instance will appear (prefixed with `owui-proxy/` by default) — click Unhide on any model to activate it
 
 5. Select Local at the bottom of the Copilot Chat panel to route requests through owui-proxy
 
-    > **Tip:** The `github.copilot.chat.byok.ollamaEndpoint` setting lets you point Copilot at a non-default address — useful inside devcontainers or when running owui-proxy on a custom port. Set it to `http://host.docker.internal:11434` when working inside Docker.
+   > **Tip:** The `github.copilot.chat.byok.ollamaEndpoint` setting lets you point Copilot at a non-default address — useful inside devcontainers or when running owui-proxy on a custom port. Set it to `http://host.docker.internal:11434` when working inside Docker.
 
+### GitHub Copilot via OpenAI-compatible endpoint
 
+If your Copilot plan or extension version uses the OpenAI wire format directly, point it at the proxy's `/v1/` base URL:
+
+```json
+// VS Code settings.json
+{
+  "github.copilot.advanced": {
+    "apiUrl": "http://localhost:11434/v1"
+  }
+}
+```
+
+Models will appear as `owui-proxy/<model-id>` in the picker. The proxy strips the prefix before forwarding to Open WebUI.
 
 ### Shell scripts
 
@@ -273,23 +328,91 @@ curl -s http://localhost:11434/api/generate -d '{
 
 ## Supported Endpoints
 
-| Endpoint | Status | Open WebUI Call |
-|----------|--------|-----------------|
-| `GET /` | ✅ Health check | Returns `"Ollama is running"` |
-| `GET /api/version` | ✅ Mocked | Returns `--mock-version` value |
-| `GET /api/tags` | ✅ Translated | `GET /api/models` |
-| `POST /api/chat` | ✅ Translated + streaming | `POST /api/chat/completions` |
-| `POST /api/generate` | ✅ Translated + streaming | `POST /api/chat/completions` |
-| `POST /api/show` | ✅ Synthesized | `GET /api/models` |
-| `POST /api/embeddings` | ✅ Translated | `POST /api/embeddings` |
-| `POST /api/embed` | ✅ Translated | `POST /api/embeddings` |
-| `GET /api/ps` | ✅ Mocked | Returns empty list |
-| `POST /api/pull` | ⚠️ 501 | Not supported |
-| `POST /api/push` | ⚠️ 501 | Not supported |
-| `DELETE /api/delete` | ⚠️ 501 | Not supported |
-| `POST /api/copy` | ⚠️ 501 | Not supported |
-| `POST /api/create` | ⚠️ 501 | Not supported |
-| `/api/blobs/*` | ⚠️ 501 | Not supported |
+### Ollama API (`/api/*`)
+
+| Endpoint               | Status                    | Open WebUI Call                   |
+| ---------------------- | ------------------------- | --------------------------------- |
+| `GET /`                | ✅ Health check           | Returns `"Ollama is running"`     |
+| `GET /api/version`     | ✅ Mocked                 | Returns `--mock-version` value    |
+| `GET /api/tags`        | ✅ Translated             | `GET /api/models`                 |
+| `POST /api/chat`       | ✅ Translated + streaming | `POST /api/chat/completions`      |
+| `POST /api/generate`   | ✅ Translated + streaming | `POST /api/chat/completions`      |
+| `POST /api/show`       | ✅ Translated             | `GET /api/models`                 |
+| `POST /api/embeddings` | ✅ Translated             | `POST /api/embeddings`            |
+| `POST /api/embed`      | ✅ Translated             | `POST /api/embeddings`            |
+| `GET /api/ps`          | ✅ Mocked                 | Returns empty list                |
+| `POST /api/pull`       | ⚠️ 501                    | Not supported                     |
+| `POST /api/push`       | ⚠️ 501                    | Not supported                     |
+| `DELETE /api/delete`   | ⚠️ 501                    | Not supported                     |
+| `POST /api/copy`       | ⚠️ 501                    | Not supported                     |
+| `POST /api/create`     | ⚠️ 501                    | Not supported                     |
+| `/api/blobs/*`         | ⚠️ 501                    | Not supported                     |
+
+### OpenAI-compatible API (`/v1/*`)
+
+| Endpoint                      | Status                    | Open WebUI Call              |
+| ----------------------------- | ------------------------- | ---------------------------- |
+| `GET /v1/models`              | ✅ Translated             | `GET /api/models`            |
+| `POST /v1/chat/completions`   | ✅ Proxied + streaming    | `POST /api/chat/completions` |
+
+The `/v1/` endpoints speak the standard OpenAI wire format — JSON for non-streaming, SSE (`data: {...}\n\n`) for streaming. Tool calling, function definitions, and all OpenAI request fields are supported.
+
+> **Model IDs and the prefix**: By default `owui-proxy` adds the prefix `owui-proxy/` to all model IDs it exposes (both `/api/tags` and `/v1/models`). It strips this prefix before forwarding any request to Open WebUI. This prevents tools from treating the proxy's models as real OpenAI/Claude endpoints. Configure with `--model-prefix` or set to empty string to disable.
+
+---
+
+## Tool Calling & Full Capability Support
+
+`owui-proxy` fully supports Ollama's tool calling, thinking/reasoning, and rich model metadata features:
+
+- **Tool calling**: `/api/chat` forwards `tools`, `tool_choice`, and `think` fields to Open WebUI. Tool calls from the model are returned in `message.tool_calls` for both streaming and non-streaming responses.
+- **Thinking/reasoning**: When the model provides reasoning content (e.g. DeepSeek-R1), it is mapped to `message.thinking` in responses.
+- **Images**: Multi-modal messages with images are forwarded as base64-encoded `image_url` content parts.
+- **Format**: Both `"json"` string format and JSON Schema objects are supported via `format`.
+- **Live model metadata**: Model metadata (`family`, `parameter_size`, `quantization_level`, `size`, `digest`, `capabilities`, `model_info`) is sourced from Open WebUI's `GET /api/models` response — specifically the `ollama` sub-object for Ollama-backed models and `info.meta` for OWUI-level capabilities. Never hardcoded or inferred.
+- **Capabilities**: All capabilities (`vision`, `tools`, `thinking`, `embedding`) are reflected accurately in `/api/show` and `/api/tags`, sourced from both the `ollama.capabilities` array and `info.meta.capabilities` map in the OWUI model data.
+
+### Tool calling example
+
+```bash
+# Request with tools
+curl http://localhost:11434/api/chat -d '{
+  "model": "llama3.1",
+  "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "get_weather",
+      "description": "Get the weather for a location",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "location": {"type": "string", "description": "City name"}
+        },
+        "required": ["location"]
+      }
+    }
+  }],
+  "stream": false
+}'
+
+# Response with tool_calls
+# {
+#   "model": "llama3.1",
+#   "message": {
+#     "role": "assistant",
+#     "content": "",
+#     "tool_calls": [{
+#       "function": {
+#         "name": "get_weather",
+#         "arguments": {"location": "Paris"}
+#       }
+#     }]
+#   },
+#   "done": true,
+#   "done_reason": "tool_calls"
+# }
+```
 
 ---
 

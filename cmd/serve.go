@@ -39,6 +39,10 @@ func init() {
 	f.String("tls-cert", "", "TLS certificate file path (enables HTTPS)")
 	f.String("tls-key", "", "TLS key file path")
 	f.Int64("max-body-size", 100*1024*1024, "Max request body size in bytes (default: 100MB)")
+	f.Bool("no-default-capabilities", false, "Disable appending default capabilities (completion,vision,tools,thinking) to all models")
+	f.Int("default-context-length", 262144, "Minimum context window size reported in /api/show model_info (default: 256K tokens)")
+	f.Bool("no-context-length-override", false, "Disable raising small upstream context lengths to --default-context-length")
+	f.String("model-prefix", "owui-proxy/", "Prefix added to model IDs in /v1/models and /api/tags; stripped before forwarding (empty string disables)")
 
 	// Bind all flags to viper
 	_ = viper.BindPFlag("endpoint", f.Lookup("endpoint"))
@@ -53,6 +57,10 @@ func init() {
 	_ = viper.BindPFlag("tls_cert", f.Lookup("tls-cert"))
 	_ = viper.BindPFlag("tls_key", f.Lookup("tls-key"))
 	_ = viper.BindPFlag("max_body_size", f.Lookup("max-body-size"))
+	_ = viper.BindPFlag("no_default_capabilities", f.Lookup("no-default-capabilities"))
+	_ = viper.BindPFlag("default_context_length", f.Lookup("default-context-length"))
+	_ = viper.BindPFlag("no_context_length_override", f.Lookup("no-context-length-override"))
+	_ = viper.BindPFlag("model_prefix", f.Lookup("model-prefix"))
 
 	// Env var overrides (without OWUI_ prefix for some)
 	_ = viper.BindEnv("endpoint", "OWUI_ENDPOINT")
@@ -67,6 +75,10 @@ func init() {
 	_ = viper.BindEnv("tls_cert", "OWUI_TLS_CERT")
 	_ = viper.BindEnv("tls_key", "OWUI_TLS_KEY")
 	_ = viper.BindEnv("max_body_size", "OWUI_MAX_BODY_SIZE")
+	_ = viper.BindEnv("no_default_capabilities", "OWUI_NO_DEFAULT_CAPABILITIES")
+	_ = viper.BindEnv("default_context_length", "OWUI_DEFAULT_CONTEXT_LENGTH")
+	_ = viper.BindEnv("no_context_length_override", "OWUI_NO_CONTEXT_LENGTH_OVERRIDE")
+	_ = viper.BindEnv("model_prefix", "OWUI_MODEL_PREFIX")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {

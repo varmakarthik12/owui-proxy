@@ -32,6 +32,12 @@ type Config struct {
 	TLSKey      string  `mapstructure:"tls_key"`
 	MaxBodySize int64   `mapstructure:"max_body_size"`
 
+	// Model defaults
+	NoDefaultCapabilities  bool   `mapstructure:"no_default_capabilities"`
+	DefaultContextLength   int    `mapstructure:"default_context_length"`
+	NoContextLengthOverride bool  `mapstructure:"no_context_length_override"`
+	ModelPrefix            string `mapstructure:"model_prefix"`
+
 	// Logging
 	LogLevel  string `mapstructure:"log_level"`
 	LogFormat string `mapstructure:"log_format"`
@@ -58,21 +64,25 @@ func (c *Config) UpstreamURL(path string) string {
 // Load reads configuration from viper (flags + env) and validates it.
 func Load() (*Config, error) {
 	cfg := &Config{
-		Endpoint:    viper.GetString("endpoint"),
-		Token:       viper.GetString("token"),
-		Port:        viper.GetInt("proxy_port"),
-		ListenAddr:  viper.GetString("listen_addr"),
-		BindAll:     viper.GetBool("bind_all"),
-		MockVersion: viper.GetString("mock_version"),
-		APIPrefix:   viper.GetString("api_prefix"),
-		Timeout:     viper.GetDuration("timeout"),
-		RateLimit:   viper.GetFloat64("rate_limit"),
-		TLSCert:     viper.GetString("tls_cert"),
-		TLSKey:      viper.GetString("tls_key"),
-		MaxBodySize: viper.GetInt64("max_body_size"),
-		LogLevel:    viper.GetString("log_level"),
-		LogFormat:   viper.GetString("log_format"),
-		NoColor:     viper.GetBool("no_color"),
+		Endpoint:             viper.GetString("endpoint"),
+		Token:                viper.GetString("token"),
+		Port:                 viper.GetInt("proxy_port"),
+		ListenAddr:           viper.GetString("listen_addr"),
+		BindAll:              viper.GetBool("bind_all"),
+		MockVersion:          viper.GetString("mock_version"),
+		APIPrefix:            viper.GetString("api_prefix"),
+		Timeout:              viper.GetDuration("timeout"),
+		RateLimit:            viper.GetFloat64("rate_limit"),
+		TLSCert:              viper.GetString("tls_cert"),
+		TLSKey:               viper.GetString("tls_key"),
+		MaxBodySize:          viper.GetInt64("max_body_size"),
+		DefaultContextLength:    viper.GetInt("default_context_length"),
+		NoDefaultCapabilities:   viper.GetBool("no_default_capabilities"),
+		NoContextLengthOverride: viper.GetBool("no_context_length_override"),
+		ModelPrefix:             viper.GetString("model_prefix"),
+		LogLevel:              viper.GetString("log_level"),
+		LogFormat:             viper.GetString("log_format"),
+		NoColor:               viper.GetBool("no_color"),
 	}
 
 	// Apply defaults for unset values.
@@ -93,6 +103,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.MaxBodySize == 0 {
 		cfg.MaxBodySize = 100 * 1024 * 1024
+	}
+	if cfg.DefaultContextLength == 0 {
+		cfg.DefaultContextLength = 262144
+	}
+	if cfg.ModelPrefix == "" {
+		cfg.ModelPrefix = "owui-proxy/"
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "info"

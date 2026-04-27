@@ -1,289 +1,276 @@
 package translator
 
 import (
+	"encoding/json"
 	"time"
+
+	ollamaapi "github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/types/model"
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/varmakarthik12/owui-proxy/internal/owuiclient"
 )
 
-// ----- Ollama response types -----
-
-// OllamaTagsResponse is the response for GET /api/tags.
-type OllamaTagsResponse struct {
-	Models []OllamaModelInfo `json:"models"`
-}
-
-// OllamaModelInfo describes a model in Ollama format.
-type OllamaModelInfo struct {
-	Name       string             `json:"name"`
-	Model      string             `json:"model"`
-	ModifiedAt string             `json:"modified_at"`
-	Size       int64              `json:"size"`
-	Digest     string             `json:"digest"`
-	Details    OllamaModelDetails `json:"details"`
-}
-
-// OllamaModelDetails contains detailed model metadata.
-type OllamaModelDetails struct {
-	ParentModel       string   `json:"parent_model"`
-	Format            string   `json:"format"`
-	Family            string   `json:"family"`
-	Families          []string `json:"families"`
-	ParameterSize     string   `json:"parameter_size"`
-	QuantizationLevel string   `json:"quantization_level"`
-}
-
-// OllamaGenerateResponse is the response for POST /api/generate (non-streaming or final chunk).
-type OllamaGenerateResponse struct {
-	Model           string `json:"model"`
-	CreatedAt       string `json:"created_at"`
-	Response        string `json:"response"`
-	Done            bool   `json:"done"`
-	DoneReason      string `json:"done_reason,omitempty"`
-	Context         []int  `json:"context,omitempty"`
-	TotalDuration   int64  `json:"total_duration,omitempty"`
-	LoadDuration    int64  `json:"load_duration,omitempty"`
-	PromptEvalCount int    `json:"prompt_eval_count,omitempty"`
-	EvalCount       int    `json:"eval_count,omitempty"`
-	EvalDuration    int64  `json:"eval_duration,omitempty"`
-}
-
-// OllamaChatResponse is the response for POST /api/chat (non-streaming or final chunk).
-type OllamaChatResponse struct {
-	Model           string        `json:"model"`
-	CreatedAt       string        `json:"created_at"`
-	Message         OllamaMessage `json:"message"`
-	Done            bool          `json:"done"`
-	DoneReason      string        `json:"done_reason,omitempty"`
-	TotalDuration   int64         `json:"total_duration,omitempty"`
-	LoadDuration    int64         `json:"load_duration,omitempty"`
-	PromptEvalCount int           `json:"prompt_eval_count,omitempty"`
-	EvalCount       int           `json:"eval_count,omitempty"`
-	EvalDuration    int64         `json:"eval_duration,omitempty"`
-}
-
-// OllamaEmbeddingsResponse is the response for POST /api/embeddings (legacy).
-type OllamaEmbeddingsResponse struct {
-	Embedding []float64 `json:"embedding"`
-}
-
-// OllamaEmbedResponse is the response for POST /api/embed (newer).
-type OllamaEmbedResponse struct {
-	Model      string      `json:"model"`
-	Embeddings [][]float64 `json:"embeddings"`
-}
-
-// OllamaShowResponse is the response for POST /api/show.
-type OllamaShowResponse struct {
-	Modelfile    string             `json:"modelfile"`
-	Parameters   string             `json:"parameters"`
-	Template     string             `json:"template"`
-	Details      OllamaModelDetails `json:"details"`
-	ModelInfo    map[string]interface{} `json:"model_info"`
-	Capabilities []string           `json:"capabilities,omitempty"`
-}
-
-// OllamaVersionResponse is the response for GET /api/version.
-type OllamaVersionResponse struct {
-	Version string `json:"version"`
-}
-
-// OllamaPsResponse is the response for GET /api/ps.
-type OllamaPsResponse struct {
-	Models []interface{} `json:"models"`
-}
-
-// ----- Translation functions -----
-
-// ModelsToTags translates an OpenAI model list to Ollama tags format.
-func ModelsToTags(models *owuiclient.ModelList) *OllamaTagsResponse {
-	ollamaModels := make([]OllamaModelInfo, 0, len(models.Data))
+// ModelsToTags translates an Open WebUI model list to Ollama tags format.
+// All metadata is sourced from OWUI's GET /api/models response — the ollama
+// sub-object carries details (family, parameter_size, etc.) and the info
+// sub-object carries OWUI-level capabilities.
+func ModelsToTags(models *owuiclient.OWUIModelList) *ollamaapi.ListResponse {
+	ollamaModels := make([]ollamaapi.ListModelResponse, 0, len(models.Data))
 
 	for _, m := range models.Data {
-		modifiedAt := time.Unix(m.Created, 0).UTC().Format(time.RFC3339)
-		if m.Created == 0 {
-			modifiedAt = time.Now().UTC().Format(time.RFC3339)
+		lmr := ollamaapi.ListModelResponse{
+			Name:  m.ID,
+			Model: m.ID,
 		}
 
-		ollamaModels = append(ollamaModels, OllamaModelInfo{
-			Name:       m.ID,
-			Model:      m.ID,
-			ModifiedAt: modifiedAt,
-			Size:       0,
-			Digest:     "",
-			Details: OllamaModelDetails{
-				ParentModel:       "",
-				Format:            "gguf",
-				Family:            inferFamily(m.ID),
-				Families:          []string{inferFamily(m.ID)},
-				ParameterSize:     "unknown",
-				QuantizationLevel: "unknown",
-			},
-		})
+		if m.Ollama != nil {
+			// Use the ollama sub-object from OWUI's /api/models response.
+			if m.Ollama.ModifiedAt != "" {
+				if t, err := time.Parse(time.RFC3339Nano, m.Ollama.ModifiedAt); err == nil {
+					lmr.ModifiedAt = t
+				} else if t, err := time.Parse(time.RFC3339, m.Ollama.ModifiedAt); err == nil {
+					lmr.ModifiedAt = t
+				} else {
+					lmr.ModifiedAt = time.Unix(m.Created, 0).UTC()
+				}
+			} else {
+				lmr.ModifiedAt = time.Unix(m.Created, 0).UTC()
+			}
+			lmr.Size = m.Ollama.Size
+			lmr.Digest = m.Ollama.Digest
+			lmr.Details = ollamaapi.ModelDetails{
+				ParentModel:       m.Ollama.Details.ParentModel,
+				Format:            m.Ollama.Details.Format,
+				Family:            m.Ollama.Details.Family,
+				Families:          m.Ollama.Details.Families,
+				ParameterSize:     m.Ollama.Details.ParameterSize,
+				QuantizationLevel: m.Ollama.Details.QuantizationLevel,
+			}
+		} else {
+			// Non-Ollama model: use created timestamp, leave details empty.
+			if m.Created > 0 {
+				lmr.ModifiedAt = time.Unix(m.Created, 0).UTC()
+			} else {
+				lmr.ModifiedAt = time.Now().UTC()
+			}
+		}
+
+		ollamaModels = append(ollamaModels, lmr)
 	}
 
-	return &OllamaTagsResponse{Models: ollamaModels}
+	return &ollamaapi.ListResponse{Models: ollamaModels}
 }
 
-// ModelToShow synthesizes an Ollama /api/show response for a given model.
-func ModelToShow(model *owuiclient.Model) *OllamaShowResponse {
-	return &OllamaShowResponse{
-		Modelfile:  "# Model info not available via Open WebUI proxy",
-		Parameters: "",
-		Template:   "{{ .Prompt }}",
-		Details: OllamaModelDetails{
-			ParentModel:       "",
-			Format:            "gguf",
-			Family:            inferFamily(model.ID),
-			Families:          []string{},
-			ParameterSize:     "unknown",
-			QuantizationLevel: "unknown",
-		},
-		ModelInfo:    map[string]interface{}{},
-		Capabilities: []string{"completion"},
+// defaultCapabilities are always appended to every model unless disabled.
+var defaultCapabilities = []string{"completion", "vision", "tools", "thinking"}
+
+// ModelToShow synthesizes an Ollama /api/show response from OWUI model data.
+// All metadata is sourced from OWUI's GET /api/models — the ollama sub-object
+// provides details and model_info, while info.meta provides capabilities.
+// Default capabilities (completion, vision, tools, thinking) are always appended
+// unless noDefaultCaps is true. Unless noCtxOverride is true, context length is
+// ensured to be at least defaultCtxLen.
+func ModelToShow(m *owuiclient.OWUIModel, noDefaultCaps bool, defaultCtxLen int, noCtxOverride bool) *ollamaapi.ShowResponse {
+	resp := &ollamaapi.ShowResponse{
+		Modelfile: "# Proxied via owui-proxy — modelfile not available",
 	}
-}
 
-// ChatCompletionToGenerate translates a non-streaming OpenAI chat completion to Ollama generate format.
-func ChatCompletionToGenerate(resp *owuiclient.ChatCompletionResponse, model string) *OllamaGenerateResponse {
-	content := ""
-	doneReason := "stop"
-	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
-		if resp.Choices[0].FinishReason != "" {
-			doneReason = resp.Choices[0].FinishReason
+	if m.Ollama != nil {
+		resp.Details = ollamaapi.ModelDetails{
+			ParentModel:       m.Ollama.Details.ParentModel,
+			Format:            m.Ollama.Details.Format,
+			Family:            m.Ollama.Details.Family,
+			Families:          m.Ollama.Details.Families,
+			ParameterSize:     m.Ollama.Details.ParameterSize,
+			QuantizationLevel: m.Ollama.Details.QuantizationLevel,
+		}
+		resp.ModelInfo = m.Ollama.ModelInfo
+
+		// Set ModifiedAt from ollama metadata.
+		if m.Ollama.ModifiedAt != "" {
+			if t, err := time.Parse(time.RFC3339Nano, m.Ollama.ModifiedAt); err == nil {
+				resp.ModifiedAt = t
+			} else if t, err := time.Parse(time.RFC3339, m.Ollama.ModifiedAt); err == nil {
+				resp.ModifiedAt = t
+			}
 		}
 	}
 
-	evalCount := 0
-	promptEvalCount := 0
-	if resp.Usage != nil {
-		evalCount = resp.Usage.CompletionTokens
-		promptEvalCount = resp.Usage.PromptTokens
+	// Fallback ModifiedAt from created timestamp.
+	if resp.ModifiedAt.IsZero() && m.Created > 0 {
+		resp.ModifiedAt = time.Unix(m.Created, 0).UTC()
 	}
 
-	return &OllamaGenerateResponse{
-		Model:           model,
-		CreatedAt:       TimeNow(),
-		Response:        content,
-		Done:            true,
-		DoneReason:      doneReason,
-		Context:         []int{},
-		TotalDuration:   0,
-		LoadDuration:    0,
-		PromptEvalCount: promptEvalCount,
-		EvalCount:       evalCount,
-		EvalDuration:    0,
+	// Build capabilities from both ollama and OWUI info sources.
+	capSet := make(map[string]bool)
+
+	if m.Ollama != nil {
+		for _, c := range m.Ollama.Capabilities {
+			capSet[c] = true
+		}
 	}
+
+	if m.Info != nil && m.Info.Meta != nil {
+		for k, v := range m.Info.Meta.Capabilities {
+			if v {
+				capSet[k] = true
+			}
+		}
+	}
+
+	// Always append default capabilities unless explicitly disabled.
+	if !noDefaultCaps {
+		for _, c := range defaultCapabilities {
+			capSet[c] = true
+		}
+	}
+
+	caps := make([]model.Capability, 0, len(capSet))
+	for c := range capSet {
+		caps = append(caps, model.Capability(c))
+	}
+	resp.Capabilities = caps
+
+	// Ensure model_info has a context_length at least as large as the default,
+	// unless the context length override is disabled.
+	if !noCtxOverride {
+		if resp.ModelInfo == nil {
+			resp.ModelInfo = make(map[string]any)
+		}
+		ensureContextLength(resp.ModelInfo, defaultCtxLen)
+	}
+
+	return resp
+}
+
+// ensureContextLength finds any *.context_length key in model_info. If found
+// and the value is smaller than minCtxLen, it's updated. If no key exists,
+// "general.context_length" is injected with minCtxLen.
+func ensureContextLength(info map[string]any, minCtxLen int) {
+	for k, v := range info {
+		if len(k) >= 15 && k[len(k)-15:] == ".context_length" {
+			if intVal, ok := toInt(v); ok && intVal >= minCtxLen {
+				return // upstream value is large enough
+			}
+			info[k] = minCtxLen
+			return
+		}
+	}
+	info["general.context_length"] = minCtxLen
+}
+
+// toInt converts a numeric value from JSON (float64) or int to int.
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 // ChatCompletionToChat translates a non-streaming OpenAI chat completion to Ollama chat format.
-func ChatCompletionToChat(resp *owuiclient.ChatCompletionResponse, model string) *OllamaChatResponse {
-	content := ""
-	doneReason := "stop"
-	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
-		if resp.Choices[0].FinishReason != "" {
-			doneReason = resp.Choices[0].FinishReason
-		}
-	}
-
-	evalCount := 0
-	promptEvalCount := 0
-	if resp.Usage != nil {
-		evalCount = resp.Usage.CompletionTokens
-		promptEvalCount = resp.Usage.PromptTokens
-	}
-
-	return &OllamaChatResponse{
-		Model:     model,
-		CreatedAt: TimeNow(),
-		Message: OllamaMessage{
-			Role:    "assistant",
-			Content: content,
+func ChatCompletionToChat(resp openai.ChatCompletionResponse, modelName string) *ollamaapi.ChatResponse {
+	chatResp := &ollamaapi.ChatResponse{
+		Model:     modelName,
+		CreatedAt: time.Now().UTC(),
+		Done:      true,
+		Metrics: ollamaapi.Metrics{
+			PromptEvalCount: resp.Usage.PromptTokens,
+			EvalCount:       resp.Usage.CompletionTokens,
 		},
-		Done:            true,
-		DoneReason:      doneReason,
-		TotalDuration:   0,
-		LoadDuration:    0,
-		PromptEvalCount: promptEvalCount,
-		EvalCount:       evalCount,
-		EvalDuration:    0,
 	}
+
+	if len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		chatResp.Message = ollamaapi.Message{
+			Role:    "assistant",
+			Content: choice.Message.Content,
+		}
+		chatResp.DoneReason = string(choice.FinishReason)
+		if chatResp.DoneReason == "" {
+			chatResp.DoneReason = "stop"
+		}
+
+		if choice.Message.ReasoningContent != "" {
+			chatResp.Message.Thinking = choice.Message.ReasoningContent
+		}
+
+		if len(choice.Message.ToolCalls) > 0 {
+			chatResp.Message.ToolCalls = mapOpenAIToolCallsToOllama(choice.Message.ToolCalls)
+		}
+	} else {
+		chatResp.Message = ollamaapi.Message{
+			Role: "assistant",
+		}
+		chatResp.DoneReason = "stop"
+	}
+
+	return chatResp
 }
 
-// EmbeddingToOllamaEmbeddings translates an OpenAI embedding response to Ollama legacy format.
-func EmbeddingToOllamaEmbeddings(resp *owuiclient.EmbeddingResponse) *OllamaEmbeddingsResponse {
-	var embedding []float64
-	if len(resp.Data) > 0 {
-		embedding = resp.Data[0].Embedding
+// ChatCompletionToGenerate translates a non-streaming OpenAI chat completion to Ollama generate format.
+func ChatCompletionToGenerate(resp openai.ChatCompletionResponse, modelName string) *ollamaapi.GenerateResponse {
+	genResp := &ollamaapi.GenerateResponse{
+		Model:     modelName,
+		CreatedAt: time.Now().UTC(),
+		Done:      true,
+		Metrics: ollamaapi.Metrics{
+			PromptEvalCount: resp.Usage.PromptTokens,
+			EvalCount:       resp.Usage.CompletionTokens,
+		},
 	}
-	return &OllamaEmbeddingsResponse{Embedding: embedding}
+
+	if len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		genResp.Response = choice.Message.Content
+		genResp.DoneReason = string(choice.FinishReason)
+		if genResp.DoneReason == "" {
+			genResp.DoneReason = "stop"
+		}
+
+		if choice.Message.ReasoningContent != "" {
+			genResp.Thinking = choice.Message.ReasoningContent
+		}
+	} else {
+		genResp.DoneReason = "stop"
+	}
+
+	return genResp
 }
 
-// EmbeddingToOllamaEmbed translates an OpenAI embedding response to Ollama newer format.
-func EmbeddingToOllamaEmbed(resp *owuiclient.EmbeddingResponse, model string) *OllamaEmbedResponse {
-	embeddings := make([][]float64, 0, len(resp.Data))
+// EmbeddingToOllamaEmbeddings translates an OpenAI embedding response to Ollama embed format.
+func EmbeddingToOllamaEmbeddings(resp openai.EmbeddingResponse) ollamaapi.EmbedResponse {
+	embeddings := make([][]float32, 0, len(resp.Data))
 	for _, d := range resp.Data {
 		embeddings = append(embeddings, d.Embedding)
 	}
-	return &OllamaEmbedResponse{
-		Model:      model,
+	return ollamaapi.EmbedResponse{
+		Model:      string(resp.Model),
 		Embeddings: embeddings,
 	}
 }
 
-// ----- helpers -----
-
-// inferFamily tries to guess a model family from its name for display purposes.
-func inferFamily(modelID string) string {
-	// Simple heuristic — not authoritative, just for display.
-	families := map[string]string{
-		"llama":   "llama",
-		"mistral": "mistral",
-		"mixtral": "mistral",
-		"gemma":   "gemma",
-		"phi":     "phi",
-		"qwen":    "qwen",
-		"claude":  "claude",
-		"gpt":     "gpt",
-		"gemini":  "gemini",
-		"codellama": "llama",
-		"deepseek": "deepseek",
-		"command": "command",
-		"nomic":   "nomic",
-	}
-
-	lower := toLower(modelID)
-	for prefix, family := range families {
-		if containsSubstring(lower, prefix) {
-			return family
+// mapOpenAIToolCallsToOllama converts OpenAI tool calls to Ollama format.
+func mapOpenAIToolCallsToOllama(toolCalls []openai.ToolCall) []ollamaapi.ToolCall {
+	result := make([]ollamaapi.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		otc := ollamaapi.ToolCall{
+			Function: ollamaapi.ToolCallFunction{
+				Name: tc.Function.Name,
+			},
 		}
-	}
-	return "unknown"
-}
 
-func toLower(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
+		var args ollamaapi.ToolCallFunctionArguments
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err == nil {
+			otc.Function.Arguments = args
 		}
-		result[i] = c
-	}
-	return string(result)
-}
 
-func containsSubstring(s, sub string) bool {
-	return len(s) >= len(sub) && findSubstring(s, sub)
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+		result = append(result, otc)
 	}
-	return false
+	return result
 }

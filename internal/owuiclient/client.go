@@ -1,6 +1,7 @@
 package owuiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,107 +11,113 @@ import (
 	"strings"
 	"time"
 
+	openai "github.com/sashabaranov/go-openai"
 	"github.com/varmakarthik12/owui-proxy/internal/config"
 )
 
-// Client is a typed HTTP client for the Open WebUI OpenAI-compatible API.
-type Client struct {
-	httpClient *http.Client
-	cfg        *config.Config
+// ----- Rich model types for Open WebUI /api/models -----
+
+// OWUIModelList is the full response from GET /api/models.
+type OWUIModelList struct {
+	Object string      `json:"object"`
+	Data   []OWUIModel `json:"data"`
 }
 
-// New creates a new Open WebUI client.
-func New(cfg *config.Config) *Client {
-	return &Client{
-		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
-			// Do NOT set timeout for streaming — we handle context cancellation.
-			// The timeout here is a safety net for non-streaming calls.
-		},
-		cfg: cfg,
+// OWUIModel represents a single model entry from Open WebUI.
+type OWUIModel struct {
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	OwnedBy string          `json:"owned_by"`
+	Ollama  *OWUIOllamaInfo `json:"ollama,omitempty"`
+	Info    *OWUIModelInfo  `json:"info,omitempty"`
+}
+
+// OWUIOllamaInfo contains Ollama-specific metadata for a model.
+type OWUIOllamaInfo struct {
+	Name          string           `json:"name"`
+	Model         string           `json:"model"`
+	ModifiedAt    string           `json:"modified_at"`
+	Size          int64            `json:"size"`
+	Digest        string           `json:"digest"`
+	Details       OWUIModelDetails `json:"details"`
+	ContextLength int              `json:"context_length"`
+	Capabilities  []string         `json:"capabilities"`
+	ModelInfo     map[string]any   `json:"model_info"`
+}
+
+// OWUIModelDetails contains detailed model metadata from Ollama.
+type OWUIModelDetails struct {
+	ParentModel       string   `json:"parent_model"`
+	Format            string   `json:"format"`
+	Family            string   `json:"family"`
+	Families          []string `json:"families"`
+	ParameterSize     string   `json:"parameter_size"`
+	QuantizationLevel string   `json:"quantization_level"`
+}
+
+// OWUIModelInfo contains Open WebUI model info metadata.
+type OWUIModelInfo struct {
+	Meta *OWUIModelMeta `json:"meta,omitempty"`
+}
+
+// OWUIModelMeta contains Open WebUI model meta information.
+type OWUIModelMeta struct {
+	Capabilities map[string]bool `json:"capabilities,omitempty"`
+	Description  string          `json:"description,omitempty"`
+}
+
+// ----- Client -----
+
+// OwuiClient is a typed client for the Open WebUI OpenAI-compatible API,
+// backed by the go-openai SDK.
+type OwuiClient struct {
+	client           *openai.Client
+	streamClient     *openai.Client
+	httpClient       *http.Client
+	streamHTTPClient *http.Client
+	cfg              *config.Config
+}
+
+// New creates a new Open WebUI client using the go-openai SDK.
+func New(cfg *config.Config) *OwuiClient {
+	baseURL := cfg.UpstreamURL("")
+
+	// Normal client with configured timeout.
+	normalCfg := openai.DefaultConfig(cfg.Token)
+	normalCfg.BaseURL = baseURL
+	normalCfg.APIType = openai.APITypeOpenAI
+	normalCfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+
+	// Streaming client with no timeout (context controls lifetime).
+	streamCfg := openai.DefaultConfig(cfg.Token)
+	streamCfg.BaseURL = baseURL
+	streamCfg.APIType = openai.APITypeOpenAI
+	streamCfg.HTTPClient = &http.Client{Timeout: 0}
+
+	return &OwuiClient{
+		client:           openai.NewClientWithConfig(normalCfg),
+		streamClient:     openai.NewClientWithConfig(streamCfg),
+		httpClient:       &http.Client{Timeout: cfg.Timeout},
+		streamHTTPClient: &http.Client{Timeout: 0},
+		cfg:              cfg,
 	}
 }
 
-// ----- OpenAI-compatible response types -----
-
-// ModelList is the response from GET /api/models.
-type ModelList struct {
-	Object string  `json:"object"`
-	Data   []Model `json:"data"`
-}
-
-// Model represents a single model entry from the OpenAI models endpoint.
-type Model struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	OwnedBy string `json:"owned_by"`
-}
-
-// EmbeddingResponse is the response from POST /api/embeddings.
-type EmbeddingResponse struct {
-	Object string          `json:"object"`
-	Data   []EmbeddingData `json:"data"`
-	Model  string          `json:"model"`
-	Usage  *EmbeddingUsage `json:"usage,omitempty"`
-}
-
-// EmbeddingData holds one embedding vector.
-type EmbeddingData struct {
-	Object    string    `json:"object"`
-	Embedding []float64 `json:"embedding"`
-	Index     int       `json:"index"`
-}
-
-// EmbeddingUsage contains token usage info.
-type EmbeddingUsage struct {
-	PromptTokens int `json:"prompt_tokens"`
-	TotalTokens  int `json:"total_tokens"`
-}
-
-// ChatCompletionResponse is the non-streaming response from POST /api/chat/completions.
-type ChatCompletionResponse struct {
-	ID      string                 `json:"id"`
-	Object  string                 `json:"object"`
-	Created int64                  `json:"created"`
-	Model   string                 `json:"model"`
-	Choices []ChatCompletionChoice `json:"choices"`
-	Usage   *ChatCompletionUsage   `json:"usage,omitempty"`
-}
-
-// ChatCompletionChoice represents a single choice in the response.
-type ChatCompletionChoice struct {
-	Index        int                    `json:"index"`
-	Message      ChatCompletionMessage  `json:"message"`
-	FinishReason string                 `json:"finish_reason"`
-}
-
-// ChatCompletionMessage represents a message in the chat completion.
-type ChatCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// ChatCompletionUsage contains token usage for chat completions.
-type ChatCompletionUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-// ----- API methods -----
-
 // ListModels fetches all available models from Open WebUI.
-func (c *Client) ListModels(ctx context.Context) (*ModelList, error) {
+// Uses raw net/http because the go-openai SDK forces /v1/models,
+// but Open WebUI serves /api/models.
+func (c *OwuiClient) ListModels(ctx context.Context) (*OWUIModelList, error) {
 	url := c.cfg.UpstreamURL("/models")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating models request: %w", err)
 	}
-	c.setHeaders(req)
+	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	req.Header.Set("User-Agent", "owui-proxy/1.0")
 
-	slog.Debug("upstream request", "method", "GET", "url", url, "token", maskToken(c.cfg.Token))
+	slog.Debug("upstream request", "method", "GET", "url", url, "token", MaskToken(c.cfg.Token))
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -123,7 +130,7 @@ func (c *Client) ListModels(ctx context.Context) (*ModelList, error) {
 		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var models ModelList
+	var models OWUIModelList
 	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
 		return nil, fmt.Errorf("decoding models response: %w", err)
 	}
@@ -132,112 +139,54 @@ func (c *Client) ListModels(ctx context.Context) (*ModelList, error) {
 }
 
 // ChatCompletion sends a non-streaming chat completion request.
-func (c *Client) ChatCompletion(ctx context.Context, body io.Reader) (*ChatCompletionResponse, error) {
-	url := c.cfg.UpstreamURL("/chat/completions")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, fmt.Errorf("creating chat completion request: %w", err)
-	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
-
-	slog.Debug("upstream request", "method", "POST", "url", url, "token", maskToken(c.cfg.Token))
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("chat completion: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding chat completion response: %w", err)
-	}
-
-	return &result, nil
+func (c *OwuiClient) ChatCompletion(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+) (openai.ChatCompletionResponse, error) {
+	return c.client.CreateChatCompletion(ctx, req)
 }
 
-// ChatCompletionStream sends a streaming chat completion request and returns
-// the raw response for SSE processing. The caller is responsible for closing
-// the response body.
-func (c *Client) ChatCompletionStream(ctx context.Context, body io.Reader) (*http.Response, error) {
-	url := c.cfg.UpstreamURL("/chat/completions")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, fmt.Errorf("creating streaming chat request: %w", err)
-	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	slog.Debug("upstream streaming request", "method", "POST", "url", url, "token", maskToken(c.cfg.Token))
-
-	// Use a client without timeout for streaming — context handles cancellation.
-	streamClient := &http.Client{
-		Timeout: 0, // no timeout; context controls lifetime
-	}
-
-	resp, err := streamClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("streaming chat completion: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	return resp, nil
+// ChatCompletionStream sends a streaming chat completion request.
+// The returned stream is owned by the caller who must call stream.Close().
+func (c *OwuiClient) ChatCompletionStream(
+	ctx context.Context,
+	req openai.ChatCompletionRequest,
+) (*openai.ChatCompletionStream, error) {
+	return c.streamClient.CreateChatCompletionStream(ctx, req)
 }
 
 // CreateEmbedding sends an embedding request to Open WebUI.
-func (c *Client) CreateEmbedding(ctx context.Context, body io.Reader) (*EmbeddingResponse, error) {
-	url := c.cfg.UpstreamURL("/embeddings")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, fmt.Errorf("creating embedding request: %w", err)
-	}
-	c.setHeaders(req)
-	req.Header.Set("Content-Type", "application/json")
-
-	slog.Debug("upstream request", "method", "POST", "url", url, "token", maskToken(c.cfg.Token))
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("creating embedding: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("upstream returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result EmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding embedding response: %w", err)
-	}
-
-	return &result, nil
+func (c *OwuiClient) CreateEmbedding(
+	ctx context.Context,
+	req openai.EmbeddingRequest,
+) (openai.EmbeddingResponse, error) {
+	return c.client.CreateEmbeddings(ctx, req)
 }
 
-// ----- helpers -----
+// ProxyRequest forwards a raw HTTP request body to the given upstream path
+// and returns the upstream response. The caller is responsible for closing
+// the response body. Uses the streaming HTTP client (no timeout) so SSE
+// responses are not cut off.
+func (c *OwuiClient) ProxyRequest(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	url := c.cfg.UpstreamURL(path)
 
-func (c *Client) setHeaders(req *http.Request) {
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating proxy request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "owui-proxy/1.0")
+
+	slog.Debug("upstream proxy request", "method", method, "url", url)
+
+	return c.streamHTTPClient.Do(req)
 }
 
-func maskToken(token string) string {
+// ----- Helpers -----
+
+// MaskToken masks a token for logging.
+func MaskToken(token string) string {
 	if len(token) <= 8 {
 		return "****"
 	}
@@ -251,14 +200,8 @@ func maskToken(token string) string {
 }
 
 // TimeNow returns the current time in RFC3339 format with nanoseconds.
-// Exported for use by translators.
 func TimeNow() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
-}
-
-// MaskToken is a public alias for token masking.
-func MaskToken(token string) string {
-	return maskToken(token)
 }
 
 // StripSensitiveHeaders removes authentication and forwarding headers from

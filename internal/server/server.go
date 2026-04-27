@@ -91,16 +91,20 @@ func Run(ctx context.Context, cfg *config.Config) error {
 }
 
 // registerRoutes sets up all Ollama-compatible API routes.
-func registerRoutes(mux *http.ServeMux, client *owuiclient.Client, cfg *config.Config) {
+func registerRoutes(mux *http.ServeMux, client *owuiclient.OwuiClient, cfg *config.Config) {
 	// Implemented endpoints.
 	mux.HandleFunc("GET /api/version", handler.Version(cfg.MockVersion))
-	mux.HandleFunc("GET /api/tags", handler.Tags(client))
-	mux.HandleFunc("POST /api/chat", handler.Chat(client))
-	mux.HandleFunc("POST /api/generate", handler.Generate(client))
-	mux.HandleFunc("POST /api/show", handler.Show(client))
-	mux.HandleFunc("POST /api/embeddings", handler.Embeddings(client))
-	mux.HandleFunc("POST /api/embed", handler.Embed(client))
+	mux.HandleFunc("GET /api/tags", handler.Tags(client, cfg))
+	mux.HandleFunc("POST /api/chat", handler.Chat(client, cfg))
+	mux.HandleFunc("POST /api/generate", handler.Generate(client, cfg))
+	mux.HandleFunc("POST /api/show", handler.Show(client, cfg))
+	mux.HandleFunc("POST /api/embeddings", handler.Embeddings(client, cfg))
+	mux.HandleFunc("POST /api/embed", handler.Embed(client, cfg))
 	mux.HandleFunc("GET /api/ps", handler.Ps())
+
+	// OpenAI-compatible /v1/* endpoints (used by GitHub Copilot, etc.).
+	mux.HandleFunc("POST /v1/chat/completions", handler.V1Chat(client, cfg))
+	mux.HandleFunc("GET /v1/models", handler.V1Models(client, cfg))
 
 	// Unimplemented endpoints — graceful 501.
 	mux.HandleFunc("POST /api/pull", handler.Unimplemented())
